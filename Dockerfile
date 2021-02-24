@@ -1,59 +1,59 @@
-FROM php:7.3-apache
+FROM php:7.4-apache
+LABEL maintainer="dev@chialab.io"
 
-RUN docker-php-ext-install mysqli && docker-php-ext-configure mysqli && docker-php-ext-enable mysqli
+# Download script to install PHP extensions and dependencies
+ADD https://raw.githubusercontent.com/mlocati/docker-php-extension-installer/master/install-php-extensions /usr/local/bin/
 
-RUN apt-get update && apt-get install -y libpq-dev libmemcached-dev curl libz-dev libpng-dev libfreetype6-dev libjpeg-dev libxpm-dev libxml2-dev libxslt-dev libmcrypt-dev libwebp-dev
+RUN chmod uga+x /usr/local/bin/install-php-extensions && sync
 
-RUN apt-get update \
-    && apt-get install -y locales \
-    && sed -i -e 's/# pt_BR.UTF-8 UTF-8/pt_BR.UTF-8 UTF-8/' /etc/locale.gen \
-    && dpkg-reconfigure --frontend=noninteractive locales \
-    && update-locale LANG=pt_BR.UTF-8
-ENV LANG pt_BR.UTF-8 
-ENV LC_ALL pt_BR.UTF-8
+RUN DEBIAN_FRONTEND=noninteractive apt-get update -q \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -qq -y \
+      curl \
+      git \
+      zip unzip \
+    && install-php-extensions \
+      bcmath \
+      bz2 \
+      calendar \
+      exif \
+      gd \
+      intl \
+      ldap \
+      memcached \
+      mysqli \
+      opcache \
+      pdo_mysql \
+      pdo_pgsql \
+      pgsql \
+      redis \
+      soap \
+      xsl \
+      zip \
+      sockets \
+      pdo_sqlsrv \
+      sqlsrv \
+# already installed:
+#      iconv \
+#      mbstring \
+    && a2enmod rewrite
 
-# Install IonCube
-RUN curl -o ioncube.tar.gz http://downloads3.ioncube.com/loader_downloads/ioncube_loaders_lin_x86-64.tar.gz \
-    && tar -xvvzf ioncube.tar.gz \
-    && mv ioncube/ioncube_loader_lin_7.2.so `php-config --extension-dir` \
-    && rm -Rf ioncube.tar.gz ioncube \
-    && docker-php-ext-enable ioncube_loader_lin_7.2
-
-ENV APACHE_DOC_ROOT=/var/www/html
-RUN sed -ri -e 's!/var/www/html!${APACHE_DOC_ROOT}!g' /etc/apache2/sites-available/*.conf
-RUN sed -ri -e 's!/var/www/!${APACHE_DOC_ROOT}!g' /etc/apache2/apache2.conf /etc/apache2/conf-available/*.conf
-
-RUN docker-php-ext-install soap && docker-php-ext-configure soap && docker-php-ext-enable soap
-RUN docker-php-ext-install pdo_mysql && docker-php-ext-configure pdo_mysql && docker-php-ext-enable pdo_mysql
-RUN docker-php-ext-configure gd \
-    --with-freetype-dir=/usr/include/ \
-    --with-jpeg-dir=/usr/include/ \
-    --with-xpm-dir=/usr/include \
-    --with-webp-dir=/usr/include/ && docker-php-ext-install gd && docker-php-ext-enable gd
-RUN docker-php-ext-install zip && docker-php-ext-configure zip && docker-php-ext-enable zip
-RUN docker-php-ext-install dom  && docker-php-ext-configure dom && docker-php-ext-enable dom
-RUN docker-php-ext-install xml && docker-php-ext-configure xml && docker-php-ext-enable xml
-RUN docker-php-ext-install pcntl && docker-php-ext-configure pcntl && docker-php-ext-enable pcntl
-RUN docker-php-ext-install intl && docker-php-ext-configure intl && docker-php-ext-enable intl
-RUN docker-php-ext-install xmlrpc && docker-php-ext-configure xmlrpc && docker-php-ext-enable xmlrpc
-RUN \
-    apt-get update && \
-    apt-get install libldap2-dev -y && \
-    rm -rf /var/lib/apt/lists/* && \
-    docker-php-ext-configure ldap --with-libdir=lib/x86_64-linux-gnu/ && \
-    docker-php-ext-install ldap
-
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends git zip wget
-
-RUN curl --silent --show-error https://getcomposer.org/installer | php -- --install-dir=/usr/bin/ --filename=composer
-
-RUN a2enmod rewrite
-RUN a2enmod expires
-RUN a2enmod headers
-
-COPY "memory-limit-php.ini" "/usr/local/etc/php/conf.d/memory-limit-php.ini"
-
-RUN apt-get install -y supervisor
-
-RUN curl -O https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar && chmod +x wp-cli.phar && mv wp-cli.phar /usr/local/bin/wp
+# Install Composer.
+ENV PATH=$PATH:/root/composer2/vendor/bin:/root/composer1/vendor/bin \
+  COMPOSER_ALLOW_SUPERUSER=1 \
+  COMPOSER_HOME=/root/composer2 \
+  COMPOSER1_HOME=/root/composer1
+RUN cd /opt \
+  # Download installer and check for its integrity.
+  && curl -sSL https://getcomposer.org/installer > composer-setup.php \
+  && curl -sSL https://composer.github.io/installer.sha384sum > composer-setup.sha384sum \
+  && sha384sum --check composer-setup.sha384sum \
+  # Install Composer 2 and expose `composer` as a symlink to it.
+  && php composer-setup.php --install-dir=/usr/local/bin --filename=composer2 --2 \
+  && ln -s /usr/local/bin/composer2 /usr/local/bin/composer \
+  # Install Composer 1, make it point to a different `$COMPOSER_HOME` directory than Composer 2, install `hirak/prestissimo` plugin.
+  && php composer-setup.php --install-dir=/usr/local/bin --filename=.composer1 --1 \
+  && printf "#!/bin/sh\nCOMPOSER_HOME=\$COMPOSER1_HOME\nexec /usr/local/bin/.composer1 \$@" > /usr/local/bin/composer1 \
+  && chmod 755 /usr/local/bin/composer1 \
+  && composer1 global require hirak/prestissimo \
+  # Remove installer files.
+  && rm /opt/composer-setup.php /opt/composer-setup.sha384sum
